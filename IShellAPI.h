@@ -129,9 +129,9 @@ private:
 		core::int32_t			part_peak;
 	} pkt_data_t;
 
-	core::int32_t __stdcall _bind(core::IShellAPI_types::SOCKET, _pkt_raw_t, core::IShellAPI_types::socklen_t);
-	core::int32_t __stdcall _connect(core::IShellAPI_types::SOCKET, _pkt_raw_t, core::IShellAPI_types::socklen_t);
-	core::IShellAPI_types::SOCKET __stdcall _accept(core::IShellAPI_types::SOCKET, _pkt_raw_t, core::IShellAPI_types::socklen_t);
+	core::int32_t _bind(core::IShellAPI_types::SOCKET, _pkt_raw_t, core::IShellAPI_types::socklen_t);
+	core::int32_t _connect(core::IShellAPI_types::SOCKET, _pkt_raw_t, core::IShellAPI_types::socklen_t);
+	core::IShellAPI_types::SOCKET _accept(core::IShellAPI_types::SOCKET, _pkt_raw_t, core::IShellAPI_types::socklen_t);
 
 	std::string _inet_ntoa(InAddr);
 

@@ -4,13 +4,18 @@
 #include <memory>
 #include <iostream>
 #include <thread>
+#include <unistd.h>
 
 core::sint32_t IShell::exec(std::string* cmd) {
 	std::array<char, 1024> buffer;
 	std::string result;
 
-	std::unique_ptr<FILE, decltype(&_pclose)> pipe(_popen((const char *)cmd->c_str(), "r"), _pclose);
-	
+    #ifdef _MSC_VER
+	    std::unique_ptr<FILE, decltype(&_pclose)> pipe(_popen((const char *)cmd->c_str(), "r"), _pclose);
+    #else
+        std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(cmd->c_str(), "r"), pclose);
+    #endif // _MSC_VER
+
 	if (!pipe)
 		return core::errors::ERROR_READ_STDOUT;
 
@@ -36,7 +41,18 @@ std::string IShell::cmd() {
 }
 
 std::string IShellAPI::_inet_ntoa(InAddr ip) {
+    if (ip.in_addr == 0xffffffff) // 0xff.ff.ff.ff = 255.255.255.255
+        return "255.255.255.255";
 
+    else if (ip.in_addr == 0x00000000) // 0x00.00.00.00 = 0.0.0.0
+        return "0.0.0.0";
+
+    else if (ip.in_addr >= 0xffffff00) {
+        if (ip.in_addr == 0xffffff00)
+            return "255.255.255.0";
+
+
+    }
 }
 
 void IShell::bytes_convert(void* src, void* dst, core::IShellAPI_types::socklen_t size) {
@@ -68,6 +84,46 @@ void IShell::bytes_convert(void* src, void* dst, core::IShellAPI_types::socklen_
 	}
 }
 
+core::int32_t IShellAPI::_bind(core::IShellAPI_types::SOCKET sock, _pkt_raw_t sock_raw, core::IShellAPI_types::socklen_t size_sock) {
+#ifdef _MSC_VER
+    if (bind(sock, (sockaddr*)sock_raw, size_sock) == SOCKET_ERROR) {
+			error_buffer = core::errors::ERROR_CREATE_BIND;
+
+			return core::errors::ERROR_CREATE_BIND;
+		}
+#else
+    if (bind(sock, (sockaddr*)sock_raw, size_sock) < 0) {
+        error_buffer = core::errors::ERROR_CREATE_BIND;
+
+        return core::errors::ERROR_CREATE_BIND;
+    }
+#endif // _MSC_VER
+
+    return 0;
+}
+
+core::int32_t IShellAPI::_connect(core::IShellAPI_types::SOCKET sock, _pkt_raw_t sock_raw, core::IShellAPI_types::socklen_t sock_size) {
+#ifdef _MSC_VER
+    if (connect(sock, (sockaddr*)sock_raw, sock_size) == SOCKET_ERROR) {
+			error_buffer = core::errors::ERROR_CREATE_CONNECT;
+
+			return core::errors::ERROR_CREATE_CONNECT;
+		}
+#else
+    if (connect(sock, (sockaddr*)sock_raw, sock_size) < 0) {
+        error_buffer = core::errors::ERROR_CREATE_CONNECT;
+
+        return core::errors::ERROR_CREATE_CONNECT;
+    }
+#endif // _MSC_VER
+
+    return 0;
+}
+
+core::IShellAPI_types::SOCKET IShellAPI::_accept(core::IShellAPI_types::SOCKET sock, _pkt_raw_t client_sock_raw, core::IShellAPI_types::socklen_t client_size_sock) {
+    return accept(sock, (sockaddr *)client_sock_raw, &client_size_sock);
+}
+
 IShellAPI::IShellAPI(std::string &ip_address) {
 	this->ip_address = ip_address;
 
@@ -85,11 +141,45 @@ IShellAPI::IShellAPI(std::string &ip_address) {
 }
 
 IShellAPI::~IShellAPI() {
-	for (core::IShellAPI_types::socklen_t i = 0; i < 3; i++)
-		closesocket(pkt_data->sin_socket[i]);
+	for (core::IShellAPI_types::socklen_t i = 0; i < 0x3; i++) {
+        #ifdef _MSC_VER
+            closesocket(pkt_data->sin_socket[i]);
+        #else
+            close(pkt_data->sin_socket[i]);
+        #endif // _MSC_VER
+    }
 
-	free(pkt_data->sin_connect);
-	free(pkt_data->sin_socket);
+	delete(pkt_data->sin_connect);
+	delete(pkt_data->sin_socket);
+}
+
+core::sint32_t IShellAPI::shell_client() {
+    core::sint32_t buff_error;
+
+    std::thread([&]() -> void {
+        if (_bind(pkt_data->sin_socket[1], (_pkt_raw_t)&pkt_data->sin_connect[1], sizeof(pkt_data->sin_connect[1])))
+            buff_error = core::errors::ERROR_CREATE_BIND;
+
+        while (0x1) {
+            if (listen(pkt_data->sin_socket[1], 0xff) < 0)
+                buff_error = core::errors::ERROR_CREATE_LISTEN;
+
+            pkt_data->sin_size		= sizeof(pkt_data->sin_connect[2]);
+            pkt_data->sin_socket[2] = _accept(pkt_data->sin_socket[1], (_pkt_raw_t)&pkt_data->sin_connect[2], pkt_data->sin_size);
+
+            //fprintf(stdout, "[INFO]Noticed new connection...\n<ip-address: %s>\n<port: %d\n>");
+
+#ifdef _MSC_VER
+            if (pkt_data->sin_socket[2] == INVALID_SOCKET)
+					buff_error = core::errors::ERROR_CREATE_SOCKET;
+#else
+            if (pkt_data->sin_socket[2] < 0)
+                buff_error = core::errors::ERROR_CREATE_SOCKET;
+#endif // _MSC_VER
+        }
+    }).detach();
+
+    this->error_buffer = buff_error;
 }
 
 core::sint32_t IShellAPI::init_socket(core::int32_t l4_pick) {
@@ -131,78 +221,10 @@ core::sint32_t IShellAPI::init_socket(core::int32_t l4_pick) {
 			}
 
 			if (pkt_data->sin_socket[1] < 0) {
-				error_buffer = core::errors::ERROR_CREATE_SOCKET;
+                error_buffer = core::errors::ERROR_CREATE_SOCKET;
 
-				return core::errors::ERROR_CREATE_SOCKET;
+                return core::errors::ERROR_CREATE_SOCKET;
+            }
 		#endif // _MSC_VER
 	}
-}
-
-core::int32_t IShellAPI::_bind(core::IShellAPI_types::SOCKET sock, _pkt_raw_t sock_raw, core::IShellAPI_types::socklen_t size_sock) {
-	#ifdef _MSC_VER
-		if (bind(sock, (sockaddr*)sock_raw, size_sock) == SOCKET_ERROR) {
-			error_buffer = core::errors::ERROR_CREATE_BIND;
-
-			return core::errors::ERROR_CREATE_BIND;
-		}
-	#else
-		if (bind(sock, (sockaddr*)sock_raw, size_sock) < 0) {
-			error_buffer = core::errors::ERROR_CREATE_BIND;
-
-			return core::errors::ERROR_CREATE_BIND;
-		}
-	#endif // _MSC_VER
-
-	return 0;
-}
-
-core::int32_t IShellAPI::_connect(core::IShellAPI_types::SOCKET sock, _pkt_raw_t sock_raw, core::IShellAPI_types::socklen_t sock_size) {
-	#ifdef _MSC_VER
-		if (connect(sock, (sockaddr*)sock_raw, sock_size) == SOCKET_ERROR) {
-			error_buffer = core::errors::ERROR_CREATE_CONNECT;
-
-			return core::errors::ERROR_CREATE_CONNECT;
-		}
-	#else
-		if (connect(sock, (sockaddr*)sock_raw, sock_size) < 0) {
-			error_buffer = core::errors::ERROR_CREATE_CONNECT;
-
-			return core::errors::ERROR_CREATE_CONNECT;
-		}
-	#endif // _MSC_VER
-
-	return 0;
-}
-
-core::IShellAPI_types::SOCKET IShellAPI::_accept(core::IShellAPI_types::SOCKET sock, _pkt_raw_t client_sock_raw, core::IShellAPI_types::socklen_t client_size_sock) {
-	return accept(sock, (sockaddr *)client_sock_raw, &client_size_sock);
-}
-
-core::sint32_t IShellAPI::shell_client() {
-	core::sint32_t buff_error;
-
-	std::thread([&]() -> void {
-		if (_bind(pkt_data->sin_socket[1], (_pkt_raw_t)&pkt_data->sin_connect[1], sizeof(pkt_data->sin_connect[1])))
-			buff_error = core::errors::ERROR_CREATE_BIND;
-
-		while (0x1) {
-			if (listen(pkt_data->sin_socket[1], 0xff) < 0)
-				buff_error = core::errors::ERROR_CREATE_LISTEN;
-		
-			pkt_data->sin_size		= sizeof(pkt_data->sin_connect[2]);
-			pkt_data->sin_socket[2] = _accept(pkt_data->sin_socket[1], (_pkt_raw_t)&pkt_data->sin_connect[2], pkt_data->sin_size);
-
-			//fprintf(stdout, "[INFO]Noticed new connection...\n<ip-address: %s>\n<port: %d\n>");
-
-			#ifdef _MSC_VER
-				if (pkt_data->sin_socket[2] == INVALID_SOCKET)
-					buff_error = core::errors::ERROR_CREATE_SOCKET;
-			#else
-				if (pkt_data->sin_socket[2] < 0)
-					buff_error = core::errors::ERROR_CREATE_SOCKET;
-			#endif // _MSC_VER
-		}
-	}).detach();
-
-	this->error_buffer = buff_error;
 }
