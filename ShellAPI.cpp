@@ -41,18 +41,13 @@ std::string IShell::cmd() {
 }
 
 std::string IShellAPI::_inet_ntoa(InAddr ip) {
-    if (ip.in_addr == 0xffffffff) // 0xff.ff.ff.ff = 255.255.255.255
-        return "255.255.255.255";
+    static __thread core::cint8_t buffer[18];
 
-    else if (ip.in_addr == 0x00000000) // 0x00.00.00.00 = 0.0.0.0
-        return "0.0.0.0";
+    core::uint8_t *bytes = (core::uint8_t *)&ip;
+    snprintf(buffer, sizeof(buffer), "%d.%d.%d.%d", *bytes, *bytes + 1, *bytes + 2, *bytes + 3);
 
-    else if (ip.in_addr >= 0xffffff00) {
-        if (ip.in_addr == 0xffffff00)
-            return "255.255.255.0";
-
-
-    }
+    std::string res_buffer = buffer;
+    return res_buffer;
 }
 
 void IShell::bytes_convert(void* src, void* dst, core::IShellAPI_types::socklen_t size) {
