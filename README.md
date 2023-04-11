@@ -1,2 +1,4 @@
 # netshell
-netshell for ipfs project
+
+
+### pet project don't done
